@@ -1,0 +1,437 @@
+###################################
+# main.tf
+###################################
+
+terraform {
+  required_providers {
+    mongodbatlas = {
+      source  = "mongodb/mongodbatlas"
+      version = "~> 1.12.0"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+
+  backend "gcs" {
+    bucket = "mongodb-atlas-tf-state"
+    prefix = "terraform/state"
+  }
+}
+
+provider "mongodbatlas" {
+  public_key  = var.mongodb_atlas_public_key
+  private_key = var.mongodb_atlas_private_key
+}
+
+provider "google" {
+  project = var.gcp_project_id
+  region  = "northamerica-northeast2"
+}
+
+module "mongodb_project" {
+  source = "./modules/atlas-project"
+  
+  org_id      = var.mongodb_atlas_org_id
+  project_id  = var.mongodb_atlas_project_id
+  project_name = "${var.environment}-mongodb-project"
+}
+
+module "mongodb_cluster" {
+  source = "./modules/atlas-cluster"
+  
+  project_id      = module.mongodb_project.project_id
+  cluster_name    = "${var.environment}-mongodb-cluster"
+  cluster_size    = var.mongodb_atlas_cluster_size
+  environment     = var.environment
+}
+
+module "mongodb_users" {
+  source = "./modules/atlas-user"
+  
+  project_id      = module.mongodb_project.project_id
+  cluster_name    = module.mongodb_cluster.cluster_name
+  database_name   = var.database_name
+}
+
+module "mongodb_network" {
+  source = "./modules/atlas-network"
+  
+  project_id      = module.mongodb_project.project_id
+  gcp_project_id  = var.gcp_project_id
+  vpc_name        = var.vpc_name
+  region          = "northamerica-northeast2"
+}
+
+###################################
+# variables.tf
+###################################
+
+variable "mongodb_atlas_public_key" {
+  description = "MongoDB Atlas API Public Key"
+  type        = string
+  sensitive   = true
+}
+
+variable "mongodb_atlas_private_key" {
+  description = "MongoDB Atlas API Private Key"
+  type        = string
+  sensitive   = true
+}
+
+variable "mongodb_atlas_org_id" {
+  description = "MongoDB Atlas Organization ID"
+  type        = string
+}
+
+variable "mongodb_atlas_project_id" {
+  description = "MongoDB Atlas Project ID"
+  type        = string
+}
+
+variable "mongodb_atlas_cluster_size" {
+  description = "MongoDB Atlas cluster size (e.g., M10, M20, M30, etc.)"
+  type        = string
+  default     = "M10"
+  
+  validation {
+    condition     = contains(["M10", "M20", "M30", "M40", "M50", "M60", "M80", "M140", "M200"], var.mongodb_atlas_cluster_size)
+    error_message = "Valid values for mongodb_atlas_cluster_size are: M10, M20, M30, M40, M50, M60, M80, M140, M200."
+  }
+}
+
+variable "environment" {
+  description = "Deployment environment (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+  
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Valid values for environment are: dev, staging, prod."
+  }
+}
+
+variable "gcp_project_id" {
+  description = "Google Cloud Platform Project ID"
+  type        = string
+}
+
+variable "vpc_name" {
+  description = "Name of the GCP VPC"
+  type        = string
+  default     = "default"
+}
+
+variable "database_name" {
+  description = "Name of the MongoDB database"
+  type        = string
+  default     = "application-db"
+}
+
+###################################
+# outputs.tf
+###################################
+
+output "mongodb_connection_string" {
+  description = "MongoDB connection string for private endpoint"
+  value       = module.mongodb_cluster.connection_string
+  sensitive   = true
+}
+
+output "mongodb_cluster_id" {
+  description = "MongoDB Atlas Cluster ID"
+  value       = module.mongodb_cluster.cluster_id
+}
+
+output "mongodb_private_endpoint" {
+  description = "MongoDB Atlas Private Endpoint"
+  value       = module.mongodb_network.private_endpoint_service_name
+}
+
+###################################
+# modules/atlas-project/main.tf
+###################################
+
+resource "mongodbatlas_project" "project" {
+  count      = var.project_id == "" ? 1 : 0
+  org_id     = var.org_id
+  name       = var.project_name
+}
+
+# Google Cloud IDP Integration
+resource "mongodbatlas_federated_settings_identity_provider" "idp" {
+  project_id = local.project_id
+  name       = "google-cloud-idp"
+  issuer_uri = "https://accounts.google.com"
+  status     = "ACTIVE"
+}
+
+locals {
+  project_id = var.project_id == "" ? mongodbatlas_project.project[0].id : var.project_id
+}
+
+###################################
+# modules/atlas-project/variables.tf
+###################################
+
+variable "org_id" {
+  description = "MongoDB Atlas Organization ID"
+  type        = string
+}
+
+variable "project_id" {
+  description = "MongoDB Atlas Project ID (leave empty to create a new project)"
+  type        = string
+  default     = ""
+}
+
+variable "project_name" {
+  description = "Name of the MongoDB Atlas project"
+  type        = string
+}
+
+###################################
+# modules/atlas-project/outputs.tf
+###################################
+
+output "project_id" {
+  description = "MongoDB Atlas Project ID"
+  value       = local.project_id
+}
+
+###################################
+# modules/atlas-cluster/main.tf
+###################################
+
+resource "mongodbatlas_cluster" "cluster" {
+  project_id                  = var.project_id
+  name                        = var.cluster_name
+  
+  provider_name               = "GCP"
+  provider_instance_size_name = var.cluster_size
+  provider_region_name        = "NORTH_AMERICA_NORTHEAST_2"
+  
+  replication_specs {
+    num_shards = 1
+    
+    regions_config {
+      region_name     = "NORTH_AMERICA_NORTHEAST_2"
+      electable_nodes = 2
+      priority        = 7
+      read_only_nodes = 0
+    }
+    
+    regions_config {
+      region_name     = "NORTH_AMERICA_NORTHEAST_1"
+      electable_nodes = 1
+      priority        = 6
+      read_only_nodes = 0
+    }
+  }
+
+  # Backup configuration for RPO of 15 minutes
+  backup_enabled               = true
+  pit_enabled                  = true  # Point-in-time recovery
+  provider_backup_enabled      = true
+  auto_scaling_disk_gb_enabled = true
+
+  # Ensure backups meet the 7-day retention requirement
+  cloud_backup {
+    point_in_time_window_hours = 24
+  }
+}
+
+###################################
+# modules/atlas-cluster/variables.tf
+###################################
+
+variable "project_id" {
+  description = "MongoDB Atlas Project ID"
+  type        = string
+}
+
+variable "cluster_name" {
+  description = "Name of the MongoDB Atlas cluster"
+  type        = string
+}
+
+variable "cluster_size" {
+  description = "MongoDB Atlas cluster size (e.g., M10, M20, M30, etc.)"
+  type        = string
+  default     = "M10"
+}
+
+variable "environment" {
+  description = "Deployment environment (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+###################################
+# modules/atlas-cluster/outputs.tf
+###################################
+
+output "cluster_id" {
+  description = "MongoDB Atlas Cluster ID"
+  value       = mongodbatlas_cluster.cluster.cluster_id
+}
+
+output "cluster_name" {
+  description = "MongoDB Atlas Cluster Name"
+  value       = mongodbatlas_cluster.cluster.name
+}
+
+output "connection_string" {
+  description = "MongoDB Atlas Connection String"
+  value       = mongodbatlas_cluster.cluster.connection_strings[0].private_endpoint[0].srv_connection_string
+  sensitive   = true
+}
+
+###################################
+# modules/atlas-user/main.tf
+###################################
+
+resource "random_password" "password" {
+  length  = 16
+  special = true
+  upper   = true
+  lower   = true
+  numeric = true
+}
+
+resource "mongodbatlas_database_user" "db_user" {
+  project_id         = var.project_id
+  username           = "app-user"  # Predefined username
+  password           = random_password.password.result
+  auth_database_name = "admin"
+  
+  roles {
+    role_name     = "readWrite"
+    database_name = var.database_name
+  }
+  
+  scopes {
+    name = var.cluster_name
+    type = "CLUSTER"
+  }
+}
+
+# Store password in GCP Secret Manager for retrieval by applications
+resource "google_secret_manager_secret" "db_password" {
+  secret_id = "mongodb-${var.cluster_name}-password"
+  
+  replication {
+    automatic = true
+  }
+}
+
+resource "google_secret_manager_secret_version" "db_password_version" {
+  secret      = google_secret_manager_secret.db_password.id
+  secret_data = random_password.password.result
+}
+
+###################################
+# modules/atlas-user/variables.tf
+###################################
+
+variable "project_id" {
+  description = "MongoDB Atlas Project ID"
+  type        = string
+}
+
+variable "cluster_name" {
+  description = "MongoDB Atlas Cluster Name"
+  type        = string
+}
+
+variable "database_name" {
+  description = "Name of the MongoDB database"
+  type        = string
+}
+
+###################################
+# modules/atlas-network/main.tf
+###################################
+
+resource "mongodbatlas_project_ip_access_list" "ip_list" {
+  project_id = var.project_id
+  cidr_block = "10.0.0.0/16"  # GCP VPC CIDR
+  comment    = "Allow GCP VPC access"
+}
+
+# Create private endpoint in MongoDB Atlas
+resource "mongodbatlas_private_endpoint" "pe" {
+  project_id    = var.project_id
+  provider_name = "GCP"
+  region        = var.region
+}
+
+# Create GCP Private Service Connect endpoint
+resource "google_compute_address" "psc_endpoint_ip" {
+  name         = "mongodb-psc-endpoint"
+  subnetwork   = "default"
+  address_type = "INTERNAL"
+  region       = var.region
+  project      = var.gcp_project_id
+}
+
+resource "google_compute_forwarding_rule" "psc_endpoint" {
+  name                  = "mongodb-psc-forwarding-rule"
+  region                = var.region
+  project               = var.gcp_project_id
+  target                = mongodbatlas_private_endpoint.pe.endpoint_service_name
+  load_balancing_scheme = ""
+  network               = var.vpc_name
+  ip_address            = google_compute_address.psc_endpoint_ip.self_link
+}
+
+# Link GCP endpoint to MongoDB Atlas private endpoint
+resource "mongodbatlas_private_endpoint_interface_link" "pe_link" {
+  project_id            = var.project_id
+  private_endpoint_id   = mongodbatlas_private_endpoint.pe.private_endpoint_id
+  interface_endpoint_id = google_compute_forwarding_rule.psc_endpoint.psc_connection_id
+  
+  depends_on = [
+    google_compute_forwarding_rule.psc_endpoint
+  ]
+}
+
+###################################
+# modules/atlas-network/variables.tf
+###################################
+
+variable "project_id" {
+  description = "MongoDB Atlas Project ID"
+  type        = string
+}
+
+variable "gcp_project_id" {
+  description = "Google Cloud Platform Project ID"
+  type        = string
+}
+
+variable "vpc_name" {
+  description = "Name of the GCP VPC"
+  type        = string
+  default     = "default"
+}
+
+variable "region" {
+  description = "GCP Region for the private endpoint"
+  type        = string
+  default     = "northamerica-northeast2"  # Toronto
+}
+
+###################################
+# modules/atlas-network/outputs.tf
+###################################
+
+output "private_endpoint_service_name" {
+  description = "MongoDB Atlas Private Endpoint Service Name"
+  value       = mongodbatlas_private_endpoint.pe.endpoint_service_name
+}
