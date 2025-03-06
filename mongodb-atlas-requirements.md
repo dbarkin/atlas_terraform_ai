@@ -29,10 +29,11 @@ This document outlines the functional and non-functional requirements for deploy
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-3.1 | The system must deploy MongoDB Atlas clusters across specified regions | High |
-| FR-3.2 | The system must configure a replica set with 3 members | High |
-| FR-3.3 | The system must deploy 2 replica members in NORTH_AMERICA_NORTHEAST_2 region | High |
-| FR-3.4 | The system must deploy 1 replica member in NORTH_AMERICA_NORTHEAST_1 region | High |
-| FR-3.5 | The system must configure clusters across different Availability Zones | High |
+| FR-3.2 | The system must allow users to specify MongoDB Atlas cluster size via parameter | High |
+| FR-3.3 | The system must configure a replica set with 3 members | High |
+| FR-3.4 | The system must deploy 2 replica members in NORTH_AMERICA_NORTHEAST_2 region | High |
+| FR-3.5 | The system must deploy 1 replica member in NORTH_AMERICA_NORTHEAST_1 region | High |
+| FR-3.6 | The system must configure clusters across different Availability Zones | High |
 
 ### 2.4 Backup and Disaster Recovery
 
