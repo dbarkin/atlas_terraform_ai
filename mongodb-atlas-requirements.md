@@ -22,7 +22,7 @@ This document outlines the functional and non-functional requirements for deploy
 |----|-------------|----------|
 | FR-2.1 | The system must configure private endpoints for MongoDB Atlas connectivity | High |
 | FR-2.2 | The system must create appropriate IP access lists for secure connectivity | High |
-| FR-2.3 | The system must support network peering between GCP VPC and MongoDB Atlas | Medium |
+| FR-2.3 | The system must support network peering between GCP VPC and MongoDB Atlas. Comment: explicit VPC peering configuration could be clarified. | Medium |
 
 ### 2.3 Cluster Configuration
 
@@ -137,34 +137,166 @@ This document outlines the functional and non-functional requirements for deploy
 ```yaml
 name: MongoDB Atlas Terraform
 
+name: 'Terraform MongoDB Atlas'
+
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'terraform/**'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      cluster_size:
+        description: 'MongoDB Atlas cluster size'
+        required: true
+        default: 'M10'
+        type: choice
+        options:
+          - M10
+          - M20
+          - M30
+          - M40
+          - M50
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+  TF_VAR_mongodb_atlas_cluster_size: ${{ github.event.inputs.cluster_size || 'M10' }}
+  TF_LOG: INFO
 
 jobs:
   terraform:
+    name: 'Terraform'
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./terraform/environments/${{ github.event.inputs.environment || 'dev' }}
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-      
-      - name: Terraform Init
-        run: terraform init
-        
-      - name: Terraform Validate
-        run: terraform validate
-        
-      - name: Terraform Plan
-        run: terraform plan
-        
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: terraform apply -auto-approve
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Auth to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.3.0
+        cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+    - name: Terraform Format
+      run: terraform fmt -check
+      continue-on-error: false
+
+    - name: Terraform Init
+      id: init
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+          -backend-config="prefix=terraform/${TF_VAR_environment}"
+
+    - name: Terraform Validate
+      id: validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      id: plan
+      env:
+        TF_VAR_mongodb_atlas_public_key: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
+        TF_VAR_mongodb_atlas_private_key: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
+        TF_VAR_mongodb_atlas_org_id: ${{ secrets.MONGODB_ATLAS_ORG_ID }}
+        TF_VAR_mongodb_atlas_project_id: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      run: terraform plan -no-color -input=false -out=tfplan
+      continue-on-error: true
+
+    - name: Update Pull Request
+      uses: actions/github-script@v6
+      if: github.event_name == 'pull_request'
+      env:
+        PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const output = `#### Terraform Plan 📝\`${{ steps.plan.outcome }}\`
+          
+          <details><summary>Show Plan</summary>
+          
+          \`\`\`\n
+          ${process.env.PLAN}
+          \`\`\`
+          
+          </details>
+          
+          *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          })
+
+    - name: Create Deployment Approval
+      uses: trstringer/manual-approval@v1
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push' && (env.TF_VAR_environment == 'staging' || env.TF_VAR_environment == 'prod')
+      with:
+        secret: ${{ secrets.GITHUB_TOKEN }}
+        approvers: ${{ vars.REQUIRED_APPROVERS }}
+        minimum-approvals: 1
+        issue-title: "Deploy to ${{ env.TF_VAR_environment }} environment"
+        issue-body: "Please approve or deny the deployment to ${{ env.TF_VAR_environment }}"
+
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      env:
+        TF_VAR_mongodb_atlas_public_key: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
+        TF_VAR_mongodb_atlas_private_key: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
+        TF_VAR_mongodb_atlas_org_id: ${{ secrets.MONGODB_ATLAS_ORG_ID }}
+        TF_VAR_mongodb_atlas_project_id: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+        TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      run: terraform apply -auto-approve -input=false tfplan
+
+    - name: Output MongoDB Connection Info
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        echo "MongoDB cluster deployment completed."
+        echo "Cluster ID: $(terraform output -raw mongodb_cluster_id)"
+        echo "Environment: ${{ env.TF_VAR_environment }}"
+        echo "Cluster size: ${{ env.TF_VAR_mongodb_atlas_cluster_size }}"
+
+    - name: Notify on Failure
+      if: failure()
+      uses: slackapi/slack-github-action@v1.23.0
+      with:
+        slack-bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+        channel-id: 'deployments'
+        text: "Terraform deployment to ${{ env.TF_VAR_environment }} failed. Check GitHub Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 ```
 
 ## 6. Success Criteria
@@ -176,3 +308,27 @@ jobs:
 | SC-3 | Backup and restore capabilities meet the specified RTO and RPO | Disaster recovery testing |
 | SC-4 | CI/CD pipeline successfully deploys infrastructure changes | Review of GitHub Actions workflow runs |
 | SC-5 | Users can be authenticated via Google Cloud IdP | Authentication testing |
+
+## 7. Architecture Design
+
+Modularity: The Terraform configuration is well-structured with modules for project, cluster, users, and network, aligning with the proposed structure in the requirements. However, the gcp-resources module isn’t explicitly separated—GCP resources are embedded in atlas-network and atlas-user.
+Environment Separation: The workflow supports environment-specific deployments (dev, staging, prod) via variables, but the Terraform directory structure doesn’t fully reflect the environments/ folder approach suggested in the requirements.
+High Availability: The 3-node replica set across two regions ensures HA, with appropriate priority settings (7 and 6) for election.
+Networking: Private endpoints and IP access lists provide a secure architecture, though the CIDR block (10.0.0.0/16) should be validated against the actual GCP VPC configuration.
+
+## 8. Security
+
+Strengths: Sensitive data is well-protected (secrets, sensitive outputs, Secret Manager). Private endpoints enforce encrypted, restricted access.
+Concerns:
+The IP access list CIDR (10.0.0.0/16) is broad; consider tightening it to specific subnets.
+No explicit audit logging or security group monitoring is configured (though Atlas may provide this).
+
+## 9. Scalability
+
+Strengths: Disk auto-scaling and cluster size options (M10-M200) provide flexibility. Multi-environment support is robust.
+Concerns: No explicit provision for horizontal scaling (e.g., sharding beyond num_shards = 1) or additional regions beyond the initial two.
+
+## 10. Maintainability
+
+Strengths: Consistent naming and modular design aid maintainability. GitHub Actions workflow is clear and well-staged.
+Concerns: Lack of detailed comments in Terraform files hinders onboarding and debugging. The absence of a rollback mechanism in the pipeline could complicate recovery.
