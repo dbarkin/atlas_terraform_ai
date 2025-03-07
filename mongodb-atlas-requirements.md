@@ -56,52 +56,60 @@ This document outlines the functional and non-functional requirements for deploy
 
 ### 3.1 Security
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| NFR-1.1 | All sensitive information must be stored as secrets in GitHub Actions | High |
-| NFR-1.2 | Database credentials must never be exposed in logs or outputs | High |
-| NFR-1.3 | All network traffic between application and MongoDB Atlas must be encrypted | High |
-| NFR-1.4 | Access to MongoDB Atlas must be restricted to authorized networks only | High |
+| ID      | Requirement                                                      | Priority |
+|---------|------------------------------------------------------------------|----------|
+| NFR-1.1 | The system must authenticate with MongoDB Atlas using API keys  | High     |
+| NFR-1.2 | API keys must be stored securely and not be visible to users     | High     |
+| NFR-1.3 | The system must support passing organization ID and project ID as parameters to Terraform | High |
+| NFR-1.4 | Project users and roles must be assigned based on Google Cloud Identity Provider (IdP) | High |
 
 ### 3.2 Scalability
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| NFR-2.1 | The infrastructure must support automatic scaling of disk storage | Medium |
+| ID      | Requirement                                                      | Priority |
+|---------|------------------------------------------------------------------|----------|
+| NFR-2.1 | The infrastructure must support automatic scaling of disk storage | Medium  |
 | NFR-2.2 | The Terraform configuration must support multiple environments (dev, test, prod) | Medium |
-| NFR-2.3 | The infrastructure must support future expansion to additional regions | Low |
+| NFR-2.3 | The infrastructure must support future expansion to additional regions | Low     |
 
 ### 3.3 Reliability
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| NFR-3.1 | The system must maintain the specified RTO of 8 hours | High |
-| NFR-3.2 | The system must maintain the specified RPO of 15 minutes | High |
+| ID      | Requirement                                         | Priority |
+|---------|-----------------------------------------------------|----------|
+| NFR-3.1 | The system must meet Recovery Time Objective (RTO) of 8 hours | High |
+| NFR-3.2 | The system must meet Recovery Point Objective (RPO) of 15 minutes | High |
 | NFR-3.3 | The Terraform scripts must ensure the cluster maintains high availability during normal operations | High |
 
 ### 3.4 Performance
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
+| ID      | Requirement                                                      | Priority |
+|---------|------------------------------------------------------------------|----------|
 | NFR-4.1 | The MongoDB Atlas cluster must be sized appropriately for the workload | Medium |
-| NFR-4.2 | The system must support monitoring of cluster performance metrics | Medium |
+| NFR-4.2 | The system must support monitoring of cluster performance metrics | Medium  |
+| **NFR-4.3** | **The system must undergo periodic performance load tests to validate throughput, latency, and resource utilization under peak traffic conditions** | **Medium** |
 
 ### 3.5 CI/CD Pipeline
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
+| ID      | Requirement                                                      | Priority |
+|---------|------------------------------------------------------------------|----------|
 | NFR-5.1 | The GitHub Actions workflow must include separate stages for init, plan, and apply | High |
 | NFR-5.2 | The CI/CD pipeline must require approval before applying changes to production | High |
 | NFR-5.3 | The pipeline must validate Terraform configurations before deployment | High |
-| NFR-5.4 | The pipeline must support rolling back changes in case of failure | Medium |
+| NFR-5.4 | The pipeline must support rolling back changes in case of failure | Medium   |
 
 ### 3.6 Maintainability
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| NFR-6.1 | The Terraform code must be well-documented with comments | Medium |
-| NFR-6.2 | The Terraform modules must follow a consistent naming convention | Medium |
+| ID      | Requirement                                                      | Priority |
+|---------|------------------------------------------------------------------|----------|
+| NFR-6.1 | The Terraform code must be well-documented with comments         | Medium   |
+| NFR-6.2 | The Terraform modules must follow a consistent naming convention | Medium   |
 | NFR-6.3 | The system must support versioning of infrastructure configurations | Medium |
+
+### 3.7 Additional Security Testing
+
+| ID       | Requirement                                                                                                                  | Priority |
+|----------|------------------------------------------------------------------------------------------------------------------------------|----------|
+| **NFR-7.1** | **The system must undergo a penetration test before production release and periodically thereafter, ensuring potential vulnerabilities are identified and remediated** | **High** |
+
 
 ## 4. Technical Constraints
 
