@@ -1,0 +1,23 @@
+name: MongoDB Atlas Terraform
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+      - run: terraform init
+      - run: terraform validate
+      - run: terraform plan
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve
+      - name: Notify on Failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.23.0
