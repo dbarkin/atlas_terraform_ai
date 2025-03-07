@@ -312,23 +312,35 @@ jobs:
 ## 7. Architecture Design
 
 Modularity: The Terraform configuration is well-structured with modules for project, cluster, users, and network, aligning with the proposed structure in the requirements. However, the gcp-resources module isn’t explicitly separated—GCP resources are embedded in atlas-network and atlas-user.
+
 Environment Separation: The workflow supports environment-specific deployments (dev, staging, prod) via variables, but the Terraform directory structure doesn’t fully reflect the environments/ folder approach suggested in the requirements.
+
 High Availability: The 3-node replica set across two regions ensures HA, with appropriate priority settings (7 and 6) for election.
+
 Networking: Private endpoints and IP access lists provide a secure architecture, though the CIDR block (10.0.0.0/16) should be validated against the actual GCP VPC configuration.
+
 
 ## 8. Security
 
 Strengths: Sensitive data is well-protected (secrets, sensitive outputs, Secret Manager). Private endpoints enforce encrypted, restricted access.
+
 Concerns:
+
 The IP access list CIDR (10.0.0.0/16) is broad; consider tightening it to specific subnets.
+
 No explicit audit logging or security group monitoring is configured (though Atlas may provide this).
+
 
 ## 9. Scalability
 
 Strengths: Disk auto-scaling and cluster size options (M10-M200) provide flexibility. Multi-environment support is robust.
+
 Concerns: No explicit provision for horizontal scaling (e.g., sharding beyond num_shards = 1) or additional regions beyond the initial two.
+
 
 ## 10. Maintainability
 
 Strengths: Consistent naming and modular design aid maintainability. GitHub Actions workflow is clear and well-staged.
+
 Concerns: Lack of detailed comments in Terraform files hinders onboarding and debugging. The absence of a rollback mechanism in the pipeline could complicate recovery.
+
