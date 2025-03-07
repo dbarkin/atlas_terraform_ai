@@ -85,7 +85,7 @@ This document outlines the functional and non-functional requirements for deploy
 |---------|------------------------------------------------------------------|----------|
 | NFR-4.1 | The MongoDB Atlas cluster must be sized appropriately for the workload | Medium |
 | NFR-4.2 | The system must support monitoring of cluster performance metrics | Medium  |
-| **NFR-4.3** | **The system must undergo periodic performance load tests to validate throughput, latency, and resource utilization under peak traffic conditions** | **Medium** |
+| NFR-4.3 | The system must undergo periodic performance load tests to validate throughput, latency, and resource utilization under peak traffic conditions | Medium |
 
 ### 3.5 CI/CD Pipeline
 
@@ -108,7 +108,7 @@ This document outlines the functional and non-functional requirements for deploy
 
 | ID       | Requirement                                                                                                                  | Priority |
 |----------|------------------------------------------------------------------------------------------------------------------------------|----------|
-| **NFR-7.1** | **The system must undergo a penetration test before production release and periodically thereafter, ensuring potential vulnerabilities are identified and remediated** | **High** |
+| NFR-7.1 | The system must undergo a penetration test before production release and periodically thereafter, ensuring potential vulnerabilities are identified and remediated | High |
 
 
 ## 4. Technical Constraints
